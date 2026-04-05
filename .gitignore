@@ -17,3 +17,4 @@ secrets.tfvars
 
 # Coder CLI binary
 coder-cli
+.env
