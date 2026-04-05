@@ -86,3 +86,18 @@ resource "google_project_service" "iap" {
   service            = "iap.googleapis.com"
   disable_on_destroy = false
 }
+
+# --- Cloud NAT (gives VMs with no public IP internet access) ---
+resource "google_compute_router" "coder" {
+  name    = "coder-router"
+  network = "default"
+  region  = var.region
+}
+
+resource "google_compute_router_nat" "coder" {
+  name                               = "coder-nat"
+  router                             = google_compute_router.coder.name
+  region                             = var.region
+  nat_ip_allocate_option             = "AUTO_ONLY"
+  source_subnetwork_ip_ranges_to_nat = "ALL_SUBNETWORKS_ALL_IP_RANGES"
+}
