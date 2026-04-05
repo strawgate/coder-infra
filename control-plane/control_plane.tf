@@ -44,7 +44,9 @@ resource "google_compute_instance" "coder" {
   }
 
   metadata_startup_script = templatefile("${path.module}/startup.sh", {
-    coder_version = var.coder_version
+    coder_version              = var.coder_version
+    github_oauth_client_id     = var.github_oauth_client_id
+    github_oauth_client_secret = var.github_oauth_client_secret
   })
 
   # Allow the VM to be stopped/started without recreating

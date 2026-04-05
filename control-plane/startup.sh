@@ -47,6 +47,18 @@ RestartSec=5
 WantedBy=multi-user.target
 EOF
 
+# Add GitHub external auth if configured
+%{ if github_oauth_client_id != "" ~}
+mkdir -p /etc/systemd/system/coder.service.d
+cat > /etc/systemd/system/coder.service.d/github-auth.conf <<'GHEOF'
+[Service]
+Environment=CODER_EXTERNAL_AUTH_0_ID=primary-github
+Environment=CODER_EXTERNAL_AUTH_0_TYPE=github
+Environment=CODER_EXTERNAL_AUTH_0_CLIENT_ID=${github_oauth_client_id}
+Environment=CODER_EXTERNAL_AUTH_0_CLIENT_SECRET=${github_oauth_client_secret}
+GHEOF
+%{ endif ~}
+
 systemctl daemon-reload
 systemctl enable --now coder.service
 

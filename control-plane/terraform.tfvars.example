@@ -2,3 +2,9 @@ project_id  = "YOUR_GCP_PROJECT_ID"
 admin_email = "you@gmail.com"
 region      = "us-central1"
 zone        = "us-central1-a"
+
+# GitHub OAuth App for git auth in workspaces (optional but recommended)
+# Create at: https://github.com/settings/applications/new
+# Callback URL: http://localhost:3000/external-auth/primary-github/callback
+# github_oauth_client_id     = "Iv1.xxxxxxxxxxxx"
+# github_oauth_client_secret = "xxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxx"

@@ -37,3 +37,16 @@ variable "coder_version" {
   type        = string
   default     = ""
 }
+
+variable "github_oauth_client_id" {
+  description = "GitHub OAuth App client ID for external auth (git operations in workspaces)"
+  type        = string
+  default     = ""
+}
+
+variable "github_oauth_client_secret" {
+  description = "GitHub OAuth App client secret"
+  type        = string
+  sensitive   = true
+  default     = ""
+}
