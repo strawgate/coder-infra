@@ -14,7 +14,7 @@ terraform {
 provider "coder" {}
 
 provider "google" {
-  project = data.coder_parameter.project_id.value
+  project = data.coder_parameter.project_id.value != "" ? data.coder_parameter.project_id.value : "placeholder"
   region  = data.coder_parameter.region.value
   zone    = data.coder_parameter.zone.value
 }
