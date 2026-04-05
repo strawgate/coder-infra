@@ -1,0 +1,88 @@
+# --- Service account for the Coder control plane ---
+resource "google_service_account" "coder" {
+  account_id   = "coder-server"
+  display_name = "Coder control plane"
+}
+
+# The control plane needs to create/manage workspace VMs
+resource "google_project_iam_member" "coder_compute" {
+  project = var.project_id
+  role    = "roles/compute.admin"
+  member  = "serviceAccount:${google_service_account.coder.email}"
+}
+
+resource "google_project_iam_member" "coder_sa_user" {
+  project = var.project_id
+  role    = "roles/iam.serviceAccountUser"
+  member  = "serviceAccount:${google_service_account.coder.email}"
+}
+
+# --- Control plane VM ---
+resource "google_compute_instance" "coder" {
+  name         = "coder-server"
+  machine_type = var.machine_type
+  zone         = var.zone
+
+  tags = ["coder-server"]
+
+  boot_disk {
+    initialize_params {
+      image = "ubuntu-os-cloud/ubuntu-2404-lts-amd64"
+      size  = var.boot_disk_size_gb
+      type  = "pd-standard"
+    }
+  }
+
+  network_interface {
+    network = "default"
+    # No access_config = no public IP
+  }
+
+  service_account {
+    email  = google_service_account.coder.email
+    scopes = ["cloud-platform"]
+  }
+
+  metadata_startup_script = templatefile("${path.module}/startup.sh", {
+    coder_version = var.coder_version
+  })
+
+  # Allow the VM to be stopped/started without recreating
+  allow_stopping_for_update = true
+}
+
+# --- Firewall: IAP tunnel traffic only ---
+resource "google_compute_firewall" "allow_iap" {
+  name    = "allow-iap-to-coder"
+  network = "default"
+
+  direction = "INGRESS"
+  priority  = 1000
+
+  allow {
+    protocol = "tcp"
+    ports    = ["22", "3000"]
+  }
+
+  # Google's IAP tunnel IP range
+  source_ranges = ["35.235.240.0/20"]
+  target_tags   = ["coder-server"]
+}
+
+# --- IAP access for admin ---
+resource "google_project_iam_member" "iap_tunnel" {
+  project = var.project_id
+  role    = "roles/iap.tunnelResourceAccessor"
+  member  = "user:${var.admin_email}"
+}
+
+# --- Enable required APIs ---
+resource "google_project_service" "compute" {
+  service            = "compute.googleapis.com"
+  disable_on_destroy = false
+}
+
+resource "google_project_service" "iap" {
+  service            = "iap.googleapis.com"
+  disable_on_destroy = false
+}

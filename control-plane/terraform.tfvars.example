@@ -1,0 +1,4 @@
+project_id  = "YOUR_GCP_PROJECT_ID"
+admin_email = "you@gmail.com"
+region      = "us-central1"
+zone        = "us-central1-a"
