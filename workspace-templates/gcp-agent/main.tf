@@ -2,7 +2,7 @@ terraform {
   required_providers {
     coder = {
       source  = "coder/coder"
-      version = ">= 2.0"
+      version = ">= 2.13"
     }
     google = {
       source  = "hashicorp/google"
@@ -19,14 +19,14 @@ provider "google" {
   zone    = data.coder_parameter.zone.value
 }
 
-# --- Parameters (prompted when creating a workspace) ---
+# --- Parameters ---
 
 data "coder_parameter" "project_id" {
-  name        = "project_id"
+  name         = "project_id"
   display_name = "GCP Project"
-  type        = "string"
-  description = "Google Cloud project ID"
-  mutable     = false
+  type         = "string"
+  description  = "Google Cloud project ID"
+  mutable      = false
 }
 
 data "coder_parameter" "region" {
@@ -67,8 +67,32 @@ data "coder_parameter" "repo_url" {
   display_name = "Repository URL"
   type         = "string"
   default      = ""
-  description  = "GitHub repo to clone (optional)"
+  description  = "GitHub repo to clone (optional, HTTPS)"
   mutable      = true
+}
+
+data "coder_parameter" "agent" {
+  name         = "agent"
+  display_name = "AI Agent"
+  type         = "string"
+  default      = "claude"
+  description  = "Which AI agent to run"
+  mutable      = false
+  option {
+    name  = "Claude Code"
+    value = "claude"
+  }
+  option {
+    name  = "GitHub Copilot"
+    value = "copilot"
+  }
+}
+
+variable "anthropic_api_key" {
+  type        = string
+  description = "Anthropic API key (required for Claude Code agent)"
+  sensitive   = true
+  default     = ""
 }
 
 # --- Workspace metadata ---
@@ -78,6 +102,23 @@ data "coder_workspace_owner" "me" {}
 
 locals {
   workspace_name = data.coder_workspace.me.name
+  use_claude     = data.coder_parameter.agent.value == "claude"
+  use_copilot    = data.coder_parameter.agent.value == "copilot"
+  workdir        = "/home/coder/project"
+}
+
+# --- Tasks integration ---
+
+data "coder_task" "me" {}
+
+resource "coder_ai_task" "claude" {
+  count  = local.use_claude ? data.coder_workspace.me.start_count : 0
+  app_id = module.claude-code[0].task_app_id
+}
+
+resource "coder_ai_task" "copilot" {
+  count  = local.use_copilot ? data.coder_workspace.me.start_count : 0
+  app_id = module.copilot[0].task_app_id
 }
 
 # --- Persistent disk (survives stop/start) ---
@@ -90,7 +131,6 @@ resource "google_compute_disk" "workspace" {
   image = "ubuntu-os-cloud/ubuntu-2404-lts-amd64"
 
   lifecycle {
-    # Don't destroy disk when workspace is merely stopped
     prevent_destroy = false
     ignore_changes  = [image]
   }
@@ -116,7 +156,6 @@ resource "google_compute_instance" "workspace" {
   }
 
   metadata = {
-    # Coder agent init script
     startup-script = coder_agent.main.init_script
   }
 
@@ -125,7 +164,6 @@ resource "google_compute_instance" "workspace" {
   }
 
   scheduling {
-    # Use spot pricing for cost savings (workspace can be preempted)
     preemptible       = true
     automatic_restart = false
   }
@@ -138,7 +176,7 @@ resource "google_compute_instance" "workspace" {
 resource "coder_agent" "main" {
   os   = "linux"
   arch = "amd64"
-  dir  = "/home/coder"
+  dir  = local.workdir
 
   display_apps {
     vscode          = true
@@ -150,33 +188,53 @@ resource "coder_agent" "main" {
     #!/bin/bash
     set -euo pipefail
 
-    # Install Claude Code if not present
-    if ! command -v claude &>/dev/null; then
-      echo "Installing Claude Code..."
-      curl -fsSL https://claude.ai/install.sh | sh
+    # Ensure Node.js 22+ is available (needed for Copilot CLI)
+    if ! command -v node &>/dev/null || [[ "$(node -v | cut -d. -f1 | tr -d v)" -lt 22 ]]; then
+      curl -fsSL https://deb.nodesource.com/setup_22.x | sudo -E bash -
+      sudo apt-get install -y nodejs
     fi
 
     # Clone repo if specified and directory doesn't exist
     REPO_URL="${data.coder_parameter.repo_url.value}"
     if [[ -n "$REPO_URL" ]]; then
-      REPO_NAME=$(basename "$REPO_URL" .git)
-      if [[ ! -d "/home/coder/$REPO_NAME" ]]; then
-        git clone "$REPO_URL" "/home/coder/$REPO_NAME"
+      if [[ ! -d "${local.workdir}" ]] || [[ -z "$(ls -A ${local.workdir} 2>/dev/null)" ]]; then
+        git clone "$REPO_URL" "${local.workdir}"
       fi
+    else
+      mkdir -p "${local.workdir}"
     fi
   SCRIPT
 
   startup_script_behavior = "blocking"
 }
 
-# --- Claude Code AI integration ---
+# --- Claude Code (official module) ---
 
-resource "coder_app" "claude" {
-  agent_id     = coder_agent.main.id
-  slug         = "claude-code"
-  display_name = "Claude Code"
-  icon         = "https://claude.ai/favicon.ico"
-  command      = "claude --ide"
+module "claude-code" {
+  count   = local.use_claude ? 1 : 0
+  source  = "registry.coder.com/coder/claude-code/coder"
+  version = "4.9.1"
+
+  agent_id       = coder_agent.main.id
+  workdir        = local.workdir
+  claude_api_key = var.anthropic_api_key
+  ai_prompt      = data.coder_task.me.prompt
+  model          = "sonnet"
+}
+
+# --- GitHub Copilot CLI (official module) ---
+
+module "copilot" {
+  count   = local.use_copilot ? 1 : 0
+  source  = "registry.coder.com/coder-labs/copilot/coder"
+  version = "0.4.0"
+
+  agent_id        = coder_agent.main.id
+  workdir         = local.workdir
+  ai_prompt       = data.coder_task.me.prompt
+  copilot_model   = "claude-sonnet-4.5"
+  allow_all_tools = true
+  resume_session  = true
 }
 
 # --- Firewall for workspace VMs ---
