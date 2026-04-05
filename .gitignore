@@ -2,12 +2,14 @@
 *.tfstate
 *.tfstate.backup
 *.tfplan
+tfplan
 .terraform/
 .terraform.lock.hcl
 crash.log
 
-# Secrets
+# Secrets — tfvars may contain project IDs and emails
 *.auto.tfvars
+terraform.tfvars
 secrets.tfvars
 
 # OS
