@@ -32,6 +32,25 @@ variable "admin_email" {
   type        = string
 }
 
+variable "coder_admin_email" {
+  description = "Email for the Coder admin account created on first boot"
+  type        = string
+  default     = ""
+}
+
+variable "coder_admin_password" {
+  description = "Password for the Coder admin account (auto-generated if empty)"
+  type        = string
+  sensitive   = true
+  default     = ""
+}
+
+variable "data_disk_size_gb" {
+  description = "Persistent data disk size in GB for Coder database (survives VM recreates)"
+  type        = number
+  default     = 10
+}
+
 variable "coder_version" {
   description = "Coder version to install (empty = latest)"
   type        = string

@@ -13,6 +13,11 @@ output "service_account_email" {
   value       = google_service_account.coder.email
 }
 
+output "data_disk_name" {
+  description = "Name of the persistent data disk (holds Coder DB)"
+  value       = google_compute_disk.coder_data.name
+}
+
 output "connect_command" {
   description = "Command to open IAP tunnel to Coder"
   value       = "gcloud compute start-iap-tunnel ${google_compute_instance.coder.name} 3000 --local-host-port=localhost:3000 --zone=${google_compute_instance.coder.zone}"

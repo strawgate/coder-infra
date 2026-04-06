@@ -129,14 +129,63 @@ To let workspace agents authenticate with GitHub:
 ## Make targets
 
 ```bash
-make init      # terraform init
-make plan      # terraform plan
-make apply     # terraform apply
-make destroy   # terraform destroy
-make fmt       # terraform fmt -recursive
-make validate  # terraform validate
-make connect   # Open IAP tunnel → localhost:3000
-make ssh       # SSH into control plane
-make start     # Start the VM
-make stop      # Stop the VM
+make init TF_STATE_BUCKET=<bucket>  # terraform init with remote backend
+make plan                           # terraform plan
+make apply                          # terraform apply
+make destroy                        # terraform destroy
+make fmt                            # terraform fmt -recursive
+make validate                       # terraform validate
+make connect                        # Open IAP tunnel → localhost:3000
+make ssh                            # SSH into control plane
+make start                          # Start the VM
+make stop                           # Stop the VM
+make bootstrap-ci GCP_PROJECT_ID=<id> GITHUB_REPO=<owner/repo>  # One-time CI setup
+make migrate-state TF_STATE_BUCKET=<bucket>                      # Migrate local → GCS
 ```
+
+## CI/CD
+
+### Architecture
+
+```
+PR opened/updated → terraform-plan.yml → plan posted as PR comment
+Merge to main     → terraform-apply.yml → auto-apply
+```
+
+Both workflows use **Workload Identity Federation** (keyless) to authenticate with GCP — no service account keys stored in GitHub.
+
+### Components
+
+| Component | Purpose |
+|-----------|---------|
+| GCS bucket (`<project>-tfstate`) | Remote Terraform state with versioning |
+| Workload Identity Pool (`github-actions`) | Maps GitHub OIDC tokens to GCP |
+| Service Account (`github-actions-terraform`) | IAM identity for Terraform in CI |
+
+### GitHub Secrets required
+
+| Secret | Example |
+|--------|---------|
+| `GCP_PROJECT_ID` | `project-758068e8-e931-45df-ae8` |
+| `GCP_WIF_PROVIDER` | `projects/.../providers/github` |
+| `GCP_SERVICE_ACCOUNT` | `github-actions-terraform@...iam.gserviceaccount.com` |
+| `TF_STATE_BUCKET` | `project-758068e8-e931-45df-ae8-tfstate` |
+| `GCP_ADMIN_EMAIL` | `you@example.com` |
+
+### First-time setup
+
+```bash
+# 1. Run bootstrap (requires gcloud auth'd locally)
+./scripts/bootstrap-ci.sh <project_id> <github_owner/repo>
+
+# 2. Add secrets printed by the script to GitHub repo settings
+
+# 3. Migrate existing local state to GCS
+make migrate-state TF_STATE_BUCKET=<bucket>
+
+# 4. Push to trigger workflows
+```
+
+### Scope
+
+CI/CD covers only the **control plane** (`control-plane/`). Workspace templates are managed by Coder itself — push them with `coder templates push`.

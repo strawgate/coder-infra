@@ -17,6 +17,18 @@ resource "google_project_iam_member" "coder_sa_user" {
   member  = "serviceAccount:${google_service_account.coder.email}"
 }
 
+# --- Persistent data disk (survives VM recreates) ---
+resource "google_compute_disk" "coder_data" {
+  name = "coder-data"
+  zone = var.zone
+  type = "pd-standard"
+  size = var.data_disk_size_gb
+
+  lifecycle {
+    prevent_destroy = true
+  }
+}
+
 # --- Control plane VM ---
 resource "google_compute_instance" "coder" {
   name         = "coder-server"
@@ -33,6 +45,11 @@ resource "google_compute_instance" "coder" {
     }
   }
 
+  attached_disk {
+    source      = google_compute_disk.coder_data.self_link
+    device_name = "coder-data"
+  }
+
   network_interface {
     network = "default"
     # No access_config = no public IP
@@ -45,6 +62,8 @@ resource "google_compute_instance" "coder" {
 
   metadata_startup_script = templatefile("${path.module}/startup.sh", {
     coder_version              = var.coder_version
+    coder_admin_email          = var.coder_admin_email != "" ? var.coder_admin_email : var.admin_email
+    coder_admin_password       = var.coder_admin_password
     github_oauth_client_id     = var.github_oauth_client_id
     github_oauth_client_secret = var.github_oauth_client_secret
   })
@@ -69,6 +88,23 @@ resource "google_compute_firewall" "allow_iap" {
   # Google's IAP tunnel IP range
   source_ranges = ["35.235.240.0/20"]
   target_tags   = ["coder-server"]
+}
+
+# --- Firewall: IAP tunnel to workspace VMs (shared across all workspaces) ---
+resource "google_compute_firewall" "allow_iap_workspaces" {
+  name    = "allow-iap-to-workspaces"
+  network = "default"
+
+  direction = "INGRESS"
+  priority  = 1000
+
+  allow {
+    protocol = "tcp"
+    ports    = ["22"]
+  }
+
+  source_ranges = ["35.235.240.0/20"]
+  target_tags   = ["coder-workspace"]
 }
 
 # --- IAP access for admin ---

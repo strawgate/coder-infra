@@ -98,6 +98,28 @@ The IAP tunnel works with zero cost but requires `gcloud` on every client. Alter
 
 No changes needed on the Coder side — just update the firewall and `CODER_ACCESS_URL`.
 
+## CI/CD
+
+Infrastructure changes deploy automatically via GitHub Actions:
+
+- **Pull requests** → `terraform plan` posted as a PR comment
+- **Merge to main** → `terraform apply` runs automatically
+
+### First-time CI setup
+
+```bash
+# 1. Run the bootstrap script (creates GCS bucket, Workload Identity Federation)
+./scripts/bootstrap-ci.sh <project_id> <github_owner/repo>
+
+# 2. Add the secrets it prints to GitHub → Settings → Secrets
+#    GCP_PROJECT_ID, GCP_WIF_PROVIDER, GCP_SERVICE_ACCOUNT, TF_STATE_BUCKET, GCP_ADMIN_EMAIL
+
+# 3. Migrate local state to GCS
+make migrate-state TF_STATE_BUCKET=<bucket_name>
+```
+
+See [DEVELOPING.md](DEVELOPING.md) for details on the CI architecture.
+
 ## Tear down
 
 ```bash

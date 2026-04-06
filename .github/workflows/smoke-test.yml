@@ -1,0 +1,89 @@
+name: "Smoke Test"
+
+on:
+  workflow_dispatch: {}
+  workflow_call: {}
+
+permissions:
+  contents: read
+  id-token: write
+
+env:
+  GCP_ZONE: us-central1-a
+  VM_NAME: coder-server
+
+jobs:
+  smoke-test:
+    name: Deployment Smoke Test
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+    steps:
+      - uses: google-github-actions/auth@v2
+        with:
+          workload_identity_provider: ${{ secrets.GCP_WIF_PROVIDER }}
+          service_account: ${{ secrets.GCP_SERVICE_ACCOUNT }}
+
+      - name: Run smoke test on control plane
+        run: |
+          gcloud compute ssh ${VM_NAME} \
+            --zone=${GCP_ZONE} \
+            --tunnel-through-iap \
+            --command='
+              set -euo pipefail
+              export HOME="${HOME:-/root}"
+              export PATH="/usr/local/bin:$PATH"
+
+              TASK_NAME="smoke-test-$(date +%s)"
+              TIMEOUT=600
+              POLL=15
+              ELAPSED=0
+              AGENT_HEALTHY=false
+
+              echo "=== Smoke Test: creating task ${TASK_NAME} ==="
+              TASK_ID=$(coder tasks create \
+                --template gcp-agent \
+                --name "${TASK_NAME}" \
+                --quiet \
+                "Respond with exactly: SMOKE_TEST_PASSED. Do not include any other text.")
+              echo "Task created: ${TASK_ID}"
+
+              cleanup() { coder tasks delete "${TASK_NAME}" --yes 2>/dev/null || true; }
+              trap cleanup EXIT
+
+              echo "=== Waiting for agent to connect and respond ==="
+              while [[ ${ELAPSED} -lt ${TIMEOUT} ]]; do
+                STATUS_JSON=$(coder tasks status "${TASK_NAME}" --output json 2>/dev/null || echo "[]")
+                if [[ "${STATUS_JSON}" != "[]" ]]; then
+                  HEALTHY=$(echo "${STATUS_JSON}" | jq -r ".healthy // .workspace_agent_health.healthy // empty")
+                  STATUS=$(echo "${STATUS_JSON}" | jq -r ".status // empty")
+                  STATE=$(echo "${STATUS_JSON}" | jq -r ".state // .current_state // empty")
+                  echo "  [${ELAPSED}s] status=${STATUS} state=${STATE} healthy=${HEALTHY}"
+
+                  if [[ "${STATUS}" == "failed" ]] || [[ "${STATE}" == "failed" ]]; then
+                    echo "FAIL: task entered failed state"
+                    exit 1
+                  fi
+
+                  if [[ "${HEALTHY}" == "true" ]]; then
+                    AGENT_HEALTHY=true
+                    RESPONSE=$(coder tasks logs "${TASK_NAME}" --output json 2>/dev/null \
+                      | jq -r ".[] | select(.type == \"output\") | .content" | tr "\n" " ")
+                    if echo "${RESPONSE}" | grep -q "SMOKE_TEST_PASSED"; then
+                      echo "=== SMOKE TEST PASSED ==="
+                      exit 0
+                    fi
+                  fi
+                else
+                  echo "  [${ELAPSED}s] waiting..."
+                fi
+                sleep ${POLL}
+                ELAPSED=$((ELAPSED + POLL))
+              done
+
+              if [[ "${AGENT_HEALTHY}" != "true" ]]; then
+                echo "FAIL: agent did not become healthy within ${TIMEOUT}s"
+              else
+                echo "FAIL: agent healthy but did not respond with SMOKE_TEST_PASSED within ${TIMEOUT}s"
+              fi
+              exit 1
+            '
